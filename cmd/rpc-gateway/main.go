@@ -24,6 +24,8 @@ func main() {
 	interval := flag.Duration("interval", 5*time.Second, "health check interval")
 	maxLag := flag.Uint64("max-lag", 3, "max blocks behind the best node before a node is skipped")
 	timeout := flag.Duration("timeout", 10*time.Second, "per-upstream request timeout")
+	rate := flag.Float64("rate", 20, "requests per second per client (API key or IP); 0 disables limiting")
+	burst := flag.Float64("burst", 40, "short burst each client may use before -rate applies")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -38,7 +40,12 @@ func main() {
 	checker := &gateway.Checker{Pool: pool, Client: client, Interval: *interval, Timeout: 3 * time.Second, MaxLag: *maxLag, Log: log}
 
 	mux := http.NewServeMux()
-	mux.Handle("POST /", &gateway.Proxy{Pool: pool, Client: client, Log: log})
+	var rpc http.Handler = &gateway.Proxy{Pool: pool, Client: client, Log: log}
+	if *rate > 0 {
+		limiter := &gateway.RateLimiter{Rate: *rate, Burst: *burst, IdleTTL: 10 * time.Minute}
+		rpc = limiter.Middleware(rpc)
+	}
+	mux.Handle("POST /", rpc)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if len(pool.Candidates()) == 0 {
 			http.Error(w, "no healthy upstreams", http.StatusServiceUnavailable)
