@@ -26,6 +26,8 @@ func main() {
 	timeout := flag.Duration("timeout", 10*time.Second, "per-upstream request timeout")
 	rate := flag.Float64("rate", 20, "requests per second per client (API key or IP); 0 disables limiting")
 	burst := flag.Float64("burst", 40, "short burst each client may use before -rate applies")
+	cacheSize := flag.Int("cache-size", 10000, "max cached results for calls that can never change; 0 disables caching")
+	finality := flag.Uint64("finality-depth", 64, "blocks below the head before a block or transaction counts as final and cacheable")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -40,7 +42,11 @@ func main() {
 	checker := &gateway.Checker{Pool: pool, Client: client, Interval: *interval, Timeout: 3 * time.Second, MaxLag: *maxLag, Log: log}
 
 	mux := http.NewServeMux()
-	var rpc http.Handler = &gateway.Proxy{Pool: pool, Client: client, Log: log}
+	proxy := &gateway.Proxy{Pool: pool, Client: client, Log: log}
+	if *cacheSize > 0 {
+		proxy.Cache = &gateway.Cache{MaxEntries: *cacheSize, FinalityDepth: *finality}
+	}
+	var rpc http.Handler = proxy
 	if *rate > 0 {
 		limiter := &gateway.RateLimiter{Rate: *rate, Burst: *burst, IdleTTL: 10 * time.Minute}
 		rpc = limiter.Middleware(rpc)

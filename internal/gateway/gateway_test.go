@@ -19,6 +19,7 @@ type fakeNode struct {
 	height atomic.Uint64
 	broken atomic.Bool // answer 500
 	hits   atomic.Int64
+	reply  atomic.Pointer[func(body string) string] // optional custom answer
 }
 
 func newFakeNode(t *testing.T, height uint64) *fakeNode {
@@ -36,6 +37,10 @@ func newFakeNode(t *testing.T, height uint64) *fakeNode {
 			return
 		}
 		n.hits.Add(1)
+		if f := n.reply.Load(); f != nil {
+			fmt.Fprint(w, (*f)(string(body)))
+			return
+		}
 		fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":"0x1"}`)
 	}))
 	t.Cleanup(n.srv.Close)

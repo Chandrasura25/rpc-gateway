@@ -37,6 +37,17 @@ func NewPool(urls map[string]string) *Pool {
 
 func (p *Pool) Upstreams() []*Upstream { return p.upstreams }
 
+// Head is the highest block any healthy node has reported (0 before the first check).
+func (p *Pool) Head() uint64 {
+	var best uint64
+	for _, u := range p.upstreams {
+		if u.Healthy() && u.Height() > best {
+			best = u.Height()
+		}
+	}
+	return best
+}
+
 // Candidates returns the healthy upstreams, rotated so each request starts
 // at a different node. The caller tries them in order until one answers.
 func (p *Pool) Candidates() []*Upstream {

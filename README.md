@@ -8,6 +8,8 @@ Standard library only.
 
 - **Round-robin** across healthy nodes.
 - **Failover per request**: if a node errors, times out, returns 5xx or 429, the same request is retried on the next node, so one bad node costs a retry, not a failed call.
+- **Node-limitation failover**: errors that describe the node, not the request ("archive requests require a token", "missing trie node", "header not found", provider rate limits) move the request to the next node. Found while testing against real Base nodes: a free node refused an old block and the error went straight to the caller. Genuine caller errors (e.g. `execution reverted`) still pass through unchanged.
+- **Caching only what can never change** (LRU, `-cache-size`): `eth_chainId`, `net_version`, `eth_getBlockByHash`, blocks by number at least `-finality-depth` below the head, and transactions/receipts once they sit that deep. `latest`, recent blocks, pending transactions, `null` results and errors are never cached, so a reorg can't leave stale data behind. Cached answers carry the caller's own request id. Header `X-Cache: HIT|MISS`.
 - **Health checks** every few seconds, all nodes in parallel (goroutines), using `eth_blockNumber`. A node is skipped when it's down **or more than `-max-lag` blocks behind the best node**, so a node that is up but stuck on an old block stops serving stale data. It comes back automatically once it catches up.
 - Shared state (health, height, round-robin counter) uses atomics; the concurrency test runs under `go test -race`.
 - **Graceful shutdown** on Ctrl+C / SIGTERM: stops accepting, lets in-flight requests finish.
@@ -33,6 +35,8 @@ The response header `X-Upstream` says which node answered.
 | `-timeout` | `10s` | per-upstream request timeout |
 | `-rate` | `20` | requests per second per client; `0` turns limiting off |
 | `-burst` | `40` | burst each client may use before `-rate` applies |
+| `-cache-size` | `10000` | max cached results; `0` turns caching off |
+| `-finality-depth` | `64` | blocks below the head before a block/transaction is cacheable |
 
 ## Test
 
@@ -40,10 +44,11 @@ The response header `X-Upstream` says which node answered.
 go test -race ./...
 ```
 
-Fake nodes (`httptest`) can be made broken, slow to catch up, or flapping. The tests cover round robin, failover, lag detection and recovery, all-nodes-down, 50 concurrent clients while one node flaps (0 failures, race-free), and the rate limiter: burst, refill (with a fake clock, no sleeps), separate clients, idle cleanup, 429 + Retry-After, and 100 goroutines on one bucket letting exactly the burst through.
+Fake nodes (`httptest`) can be made broken, slow to catch up, or flapping. The tests cover round robin, failover, lag detection and recovery, all-nodes-down, 50 concurrent clients while one node flaps (0 failures, race-free), and the rate limiter: burst, refill (with a fake clock, no sleeps), separate clients, idle cleanup, 429 + Retry-After, and 100 goroutines on one bucket letting exactly the burst through. Cache tests cover HIT/MISS with the caller's id, whitespace-insensitive keys, `latest`/recent/pending never cached, finalized blocks and transactions cached, nulls/errors never cached, batches passed through, LRU eviction, and archive-error failover vs. a revert passing through.
 
 ## Not done yet
 
-- Response caching for immutable calls, Prometheus metrics.
+- Prometheus metrics.
+- Two identical cache misses arriving together both go upstream (no request coalescing yet).
 - Batch requests are forwarded as one unit, not split across nodes.
 - WebSocket subscriptions are not proxied.
