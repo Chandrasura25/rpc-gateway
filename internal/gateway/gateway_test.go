@@ -20,6 +20,7 @@ type fakeNode struct {
 	broken atomic.Bool // answer 500
 	hits   atomic.Int64
 	reply  atomic.Pointer[func(body string) string] // optional custom answer
+	delay  atomic.Int64                             // optional: milliseconds to wait before answering
 }
 
 func newFakeNode(t *testing.T, height uint64) *fakeNode {
@@ -37,6 +38,9 @@ func newFakeNode(t *testing.T, height uint64) *fakeNode {
 			return
 		}
 		n.hits.Add(1)
+		if d := n.delay.Load(); d > 0 {
+			time.Sleep(time.Duration(d) * time.Millisecond)
+		}
 		if f := n.reply.Load(); f != nil {
 			fmt.Fprint(w, (*f)(string(body)))
 			return

@@ -19,6 +19,7 @@ type RateLimiter struct {
 	// doesn't grow forever. A dropped client simply starts with a full bucket.
 	IdleTTL time.Duration
 	Now     func() time.Time // injectable clock for tests
+	Metrics *Metrics         // optional: counts refused requests
 
 	mu      sync.Mutex
 	buckets map[string]*bucket
@@ -84,6 +85,7 @@ func (l *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ok, wait := l.Allow(clientKey(r))
 		if !ok {
+			l.Metrics.RateLimited()
 			secs := int(math.Ceil(wait.Seconds()))
 			w.Header().Set("Retry-After", fmt.Sprint(secs))
 			w.Header().Set("Content-Type", "application/json")

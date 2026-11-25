@@ -42,16 +42,18 @@ func main() {
 	checker := &gateway.Checker{Pool: pool, Client: client, Interval: *interval, Timeout: 3 * time.Second, MaxLag: *maxLag, Log: log}
 
 	mux := http.NewServeMux()
-	proxy := &gateway.Proxy{Pool: pool, Client: client, Log: log}
+	metrics := &gateway.Metrics{}
+	proxy := &gateway.Proxy{Pool: pool, Client: client, Metrics: metrics, Log: log}
 	if *cacheSize > 0 {
 		proxy.Cache = &gateway.Cache{MaxEntries: *cacheSize, FinalityDepth: *finality}
 	}
 	var rpc http.Handler = proxy
 	if *rate > 0 {
-		limiter := &gateway.RateLimiter{Rate: *rate, Burst: *burst, IdleTTL: 10 * time.Minute}
+		limiter := &gateway.RateLimiter{Rate: *rate, Burst: *burst, IdleTTL: 10 * time.Minute, Metrics: metrics}
 		rpc = limiter.Middleware(rpc)
 	}
 	mux.Handle("POST /", rpc)
+	mux.Handle("GET /metrics", metrics.Handler(pool))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if len(pool.Candidates()) == 0 {
 			http.Error(w, "no healthy upstreams", http.StatusServiceUnavailable)
